@@ -34,7 +34,7 @@ class Task
     uint64_t parent_id;
     TaskType type;
     TaskState state;
-    bool is_initial; 
+    bool initial; 
     const void * codeptr_ra; 
     // A list of tasks that were created by this task
     std::vector<Task *> ancestry_children;
@@ -51,7 +51,7 @@ class Task
       parent_id(parent_id), 
       type(task_type), 
       state(TaskState::Created), 
-      is_initial(false),
+      initial(false),
       codeptr_ra(codeptr_ra)
       {}
 
@@ -76,6 +76,10 @@ class Task
       return this->codeptr_ra; 
     }
 
+    bool is_initial() {
+      return initial; 
+    }
+
     // Mutators 
     void add_tsp(ompt_task_status_t tsp) {
       boost::lock_guard<boost::mutex> lock(this->mtx);
@@ -94,7 +98,7 @@ class Task
                                        
     void set_as_initial_task() {       
       boost::lock_guard<boost::mutex> lock(this->mtx);
-      this->is_initial = true;         
+      this->initial = true;         
     }                                  
                                        
     void print(int verbosity = 0) {
@@ -130,7 +134,7 @@ class Task
           printf("\t- State: Unrecognized\n");
         }
         // Print whether this was the initial task or not
-        if (this->is_initial == true) {
+        if (this->is_initial() == true) {
           printf("\t- Initial Task: True\n");
         } else {
           printf("\t- Initial Task: False\n");

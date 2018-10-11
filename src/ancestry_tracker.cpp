@@ -81,8 +81,46 @@ void add_vertices(tool_data_t * tool_data) {
   } 
 }
 
-void add_edges(tool_data_t * tool_data) { 
+void link_region_with_parent(ParallelRegion * pr) {
+  uint64_t region_id = pr->get_id();
+  uint64_t parent_id = pr->get_parent_id(); 
+  auto id_to_vertex = &(tool_data_ptr->id_to_vertex);
+  auto region_search = id_to_vertex->find(region_id);
+  auto parent_search = id_to_vertex->find(parent_id);
+  if (region_search != id_to_vertex->end() && parent_search != id_to_vertex->end()) {
+    vertex_t region_vertex = region_search->second;
+    vertex_t parent_vertex = parent_search->second;
+    boost::add_edge(parent_vertex, region_vertex, tool_data_ptr->tree); 
+  }
+}
 
+void link_task_with_parent(Task * t) {
+  // Exit early if this is the initial task
+  if (t->is_initial()) {
+    return;
+  } 
+  uint64_t task_id = t->get_id();
+  uint64_t parent_id = t->get_parent_id(); 
+  auto id_to_vertex = &(tool_data_ptr->id_to_vertex);
+  auto task_search = id_to_vertex->find(task_id);
+  auto parent_search = id_to_vertex->find(parent_id);
+  if (task_search != id_to_vertex->end() && parent_search != id_to_vertex->end()) {
+    vertex_t task_vertex = task_search->second;
+    vertex_t parent_vertex = parent_search->second;
+    boost::add_edge(parent_vertex, task_vertex, tool_data_ptr->tree); 
+  }
+}
+
+
+void add_edges(tool_data_t * tool_data) { 
+  auto id_to_region = tool_data->id_to_parallel_region;
+  for (auto e : id_to_region) {
+     link_region_with_parent(e.second);   
+  } 
+  auto id_to_task = tool_data->id_to_task;
+  for (auto e : id_to_task) {
+     link_task_with_parent(e.second);   
+  } 
 } 
 
 
@@ -91,7 +129,33 @@ void build_tree(tool_data_t * tool_data) {
   add_edges(tool_data); 
 }
 
+void write_tree(tree_t tree) {
+  // Get dotfile name for task tree visualization from environment
+  char * env_var;
+  std::string tree_dotfile;
+  env_var = getenv("TASK_TREE_DOTFILE");
+  if (env_var == NULL) {
+    printf("TASK_TREE_DOTFILE not specified\n");
+    tree_dotfile = "./tree.dot"; 
+  } else {
+    tree_dotfile = env_var;
+  }
+  // Open the stream to the dotfile for the task ancestry tree
+  std::ofstream out(tree_dotfile);
+  // Construct custom vertex writer
+  auto tree_vw = make_vertex_writer(
+    boost::get(&vertex_properties::vertex_id, tree),
+    boost::get(&vertex_properties::vertex_type, tree),
+    boost::get(&vertex_properties::color, tree),
+    boost::get(&vertex_properties::shape, tree),
+    boost::get(&vertex_properties::status, tree),
+    boost::get(&vertex_properties::codeptr_ra, tree),
+    boost::get(&vertex_properties::dependences, tree)
+  );
+  // Write out the task ancestry tree 
+  boost::write_graphviz(out, tree, tree_vw); 
 
+}
 
 /******************************************************************************\
  * This function writes the parent-child tree and dependence DAG out to files
@@ -103,43 +167,14 @@ void signal_handler(int signum) {
   printf("\n\nTool caught signal: %d\n", signum);
 #endif
   
-  // Get dotfile name for task tree visualization from environment
-  char * env_var;
-  std::string task_tree_dotfile;
-  env_var = getenv("TASK_TREE_DOTFILE");
-  if (env_var == NULL) {
-    printf("TASK_TREE_DOTFILE not specified\n");
-    exit(signum);
-  } else {
-    task_tree_dotfile = env_var;
-  }
-
   // Build the tree
   build_tree(tool_data_ptr);
   tree_t task_tree = tool_data_ptr->tree;
 
   std::cout << "Number of vertices in task tree: " << boost::num_edges(task_tree) << std::endl;
 
-  //// Open the stream to the dotfile for the task ancestry tree
-  //std::ofstream task_tree_dot(task_tree_dotfile);
-  //// Construct custom vertex writer
-  //auto task_tree_vw = make_vertex_writer(boost::get(&vertex_properties::vertex_id, 
-  //                                                  task_tree),
-  //                                       boost::get(&vertex_properties::vertex_type,
-  //                                                  task_tree),
-  //                                       boost::get(&vertex_properties::color, 
-  //                                                  task_tree),
-  //                                       boost::get(&vertex_properties::shape,
-  //                                                  task_tree),
-  //                                       boost::get(&vertex_properties::status,
-  //                                                  task_tree),
-  //                                       boost::get(&vertex_properties::codeptr_ra,
-  //                                                  task_tree),
-  //                                       boost::get(&vertex_properties::dependences,
-  //                                                  task_tree)
-  //                                      );
-  //// Write out the task ancestry tree 
-  //boost::write_graphviz(task_tree_dot, task_tree, task_tree_vw); 
+  // Write the tree
+  write_tree(task_tree); 
 
   exit(signum);
 }
@@ -221,14 +256,21 @@ void ompt_finalize(ompt_data_t *tool_data)
 
   std::cout << "Number of vertices in task tree: " << boost::num_vertices(task_tree) << std::endl;
 
+  write_tree(task_tree); 
+
   printf("0: ompt_event_runtime_shutdown\n"); 
 
-  // Delete all of the task objects 
+  // Delete tool data 
   for ( auto e : tool_data_ptr->id_to_task ) {
+    delete e.second; 
+  }
+  for ( auto e : tool_data_ptr->id_to_parallel_region ) {
     delete e.second; 
   }
   delete (tool_data_t*)tool_data->ptr; 
 }
+
+
 
 /* "A tool indicates its interest in using the OMPT interface by providing a 
  * non-NULL pointer to an ompt_fns_t structure to an OpenMP implementation as a 

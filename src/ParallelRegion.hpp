@@ -26,6 +26,10 @@ class ParallelRegion
       return id; 
     }   
     
+    uint64_t get_parent_id() {
+      return parent_id;
+    }
+
     const void* get_codeptr_ra() {
       return codeptr_ra; 
     }   
